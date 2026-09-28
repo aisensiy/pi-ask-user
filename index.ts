@@ -387,9 +387,10 @@ function buildShortcut(spec: string): ResolvedShortcut {
 function resolveShortcut(
    paramValue: string | null | undefined,
    envValue: string | undefined,
+   fileValue: string | undefined,
    defaultSpec: string,
 ): ResolvedShortcut {
-   const candidates: Array<string | null | undefined> = [paramValue, envValue, defaultSpec];
+   const candidates: Array<string | null | undefined> = [paramValue, envValue, fileValue, defaultSpec];
    for (const raw of candidates) {
       const normalized = normalizeShortcutSpec(raw);
       if (normalized === undefined) continue; // not provided, fall through
@@ -2140,7 +2141,7 @@ export default function(pi: ExtensionAPI) {
          const effectiveDisplayMode: AskDisplayMode = displayMode ?? envDisplayMode ?? settings.displayMode ?? "overlay";
          const envSingleSelectLayout = process.env.PI_ASK_USER_SINGLE_SELECT_LAYOUT?.trim().toLowerCase();
          const effectiveSingleSelectLayout: AskSingleSelectLayout = singleSelectLayout
-            ?? (envSingleSelectLayout === "list" ? "list" : undefined)
+            ?? (envSingleSelectLayout === "list" || envSingleSelectLayout === "auto" ? envSingleSelectLayout : undefined)
             ?? settings.singleSelectLayout
             ?? "auto";
          const allowComment = requestedAllowComment
@@ -2155,12 +2156,14 @@ export default function(pi: ExtensionAPI) {
             overlayToggle: resolveShortcut(
                overlayToggleKey,
                process.env.PI_ASK_USER_OVERLAY_TOGGLE_KEY,
-               settings.overlayToggleKey ?? DEFAULT_OVERLAY_TOGGLE_KEY,
+               settings.overlayToggleKey,
+               DEFAULT_OVERLAY_TOGGLE_KEY,
             ),
             commentToggle: resolveShortcut(
                commentToggleKey,
                process.env.PI_ASK_USER_COMMENT_TOGGLE_KEY,
-               settings.commentToggleKey ?? DEFAULT_COMMENT_TOGGLE_KEY,
+               settings.commentToggleKey,
+               DEFAULT_COMMENT_TOGGLE_KEY,
             ),
          };
          const options = rawOptions.map(coerceOption).filter((option): option is QuestionOption => option !== null);

@@ -733,6 +733,151 @@ describe("ask_user", () => {
             ),
          ).rejects.toThrow(/ask-user\.json/);
       });
+
+      async function renderSingleSelectWithSettings(params: Record<string, unknown> = {}): Promise<string> {
+         const tool = await setupTool();
+         let rendered = "";
+         await tool.execute(
+            "tool-call-id",
+            {
+               question: "Which option should we use?",
+               options: [{ title: "Alpha", description: "Alpha details." }],
+               ...params,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async (factory: unknown) => {
+                     rendered = renderSingleSelectFromFactory(factory);
+                     return null;
+                  },
+               },
+            },
+         );
+         return rendered;
+      }
+
+      test("applies singleSelectLayout from ask-user.json when the env var is unset", async () => {
+         stubSettingsFile(JSON.stringify({ singleSelectLayout: "list" }));
+         const rendered = await renderSingleSelectWithSettings();
+         expect(rendered).not.toContain("## Alpha");
+      });
+
+      test("PI_ASK_USER_SINGLE_SELECT_LAYOUT=auto overrides ask-user.json singleSelectLayout", async () => {
+         stubSettingsFile(JSON.stringify({ singleSelectLayout: "list" }));
+         stubEnv("PI_ASK_USER_SINGLE_SELECT_LAYOUT", "auto");
+         const rendered = await renderSingleSelectWithSettings();
+         expect(rendered).toContain("## Alpha");
+      });
+
+      test("valid overlayToggleKey in ask-user.json replaces the default alt+o", async () => {
+         stubSettingsFile(JSON.stringify({ overlayToggleKey: "alt+h" }));
+         const tool = await setupTool();
+         const calls: boolean[] = [];
+         let inputHandler: ((data: string) => any) | undefined;
+
+         await tool.execute(
+            "tool-call-id",
+            { question: "Q", options: ["A"] },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async (_factory: any, options: any) => {
+                     options.onHandle?.({
+                        hide() { },
+                        setHidden(value: boolean) { calls.push(value); },
+                        isHidden() { return false; },
+                        focus() { },
+                     });
+                     const ignored = inputHandler?.("alt+o");
+                     const consumed = inputHandler?.("alt+h");
+                     expect(ignored).toBeUndefined();
+                     expect(consumed).toEqual({ consume: true });
+                     return null;
+                  },
+                  onTerminalInput: (handler: (data: string) => any) => {
+                     inputHandler = handler;
+                     return () => { };
+                  },
+                  notify: () => { },
+               },
+            },
+         );
+
+         expect(calls).toEqual([true]);
+      });
+
+      test("invalid overlayToggleKey in ask-user.json falls back to the default alt+o", async () => {
+         stubSettingsFile(JSON.stringify({ overlayToggleKey: "alt+ space" }));
+         const tool = await setupTool();
+         const calls: boolean[] = [];
+         let inputHandler: ((data: string) => any) | undefined;
+
+         await tool.execute(
+            "tool-call-id",
+            { question: "Q", options: ["A"] },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async (_factory: any, options: any) => {
+                     options.onHandle?.({
+                        hide() { },
+                        setHidden(value: boolean) { calls.push(value); },
+                        isHidden() { return false; },
+                        focus() { },
+                     });
+                     const consumed = inputHandler?.("alt+o");
+                     expect(consumed).toEqual({ consume: true });
+                     return null;
+                  },
+                  onTerminalInput: (handler: (data: string) => any) => {
+                     inputHandler = handler;
+                     return () => { };
+                  },
+                  notify: () => { },
+               },
+            },
+         );
+
+         expect(calls).toEqual([true]);
+      });
+
+      test("invalid commentToggleKey in ask-user.json falls back to the default ctrl+g", async () => {
+         stubSettingsFile(JSON.stringify({ commentToggleKey: "alt+ space" }));
+         const tool = await setupTool();
+         let renderedAfter = "";
+
+         await tool.execute(
+            "tool-call-id",
+            { question: "Q", options: ["Alpha", "Beta"], allowComment: true },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async (factory: any) => {
+                     const component = factory(
+                        { requestRender() { }, terminal: { rows: 24 } },
+                        createTheme(),
+                        createKeybindings(),
+                        () => { },
+                     );
+                     component.handleInput("ctrl+g");
+                     renderedAfter = ((component as any).singleSelectList as any).render(80).join("\n");
+                     return null;
+                  },
+               },
+            },
+         );
+
+         expect(renderedAfter).toContain("[✓] Add extra context after selection");
+      });
    });
 
    describe("overlay hide/show toggle (alt+o)", () => {
