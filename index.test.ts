@@ -1,5 +1,8 @@
 import { beforeAll, describe, expect, mock, onTestFinished, spyOn, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { getEventListeners } from "node:events";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { StringEnumBuilder } from "./index";
 
 let editorInputs: string[] = [];
@@ -662,6 +665,74 @@ describe("ask_user", () => {
       );
 
       expect(capturedOptions.overlay).toBe(true);
+   });
+
+   describe("ask-user.json settings file", () => {
+      function stubSettingsFile(contents: string): void {
+         const dir = mkdtempSync(join(tmpdir(), "ask-user-agent-dir-"));
+         writeFileSync(join(dir, "ask-user.json"), contents, "utf8");
+         stubEnv("PI_CODING_AGENT_DIR", dir);
+      }
+
+      async function executeWithCapturedOptions(params: Record<string, unknown>): Promise<any> {
+         const tool = await setupTool();
+         let capturedOptions: any;
+         await tool.execute(
+            "tool-call-id",
+            { question: "Which option should we use?", options: ["A", "B"], ...params },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async (_factory: any, options: any) => {
+                     capturedOptions = options;
+                     return null;
+                  },
+               },
+            },
+         );
+         return capturedOptions;
+      }
+
+      test("uses ask-user.json displayMode when the env var and call-level value are unset", async () => {
+         stubSettingsFile(JSON.stringify({ displayMode: "inline" }));
+         const capturedOptions = await executeWithCapturedOptions({});
+         expect(capturedOptions).toBeUndefined();
+      });
+
+      test("PI_ASK_USER_DISPLAY_MODE env var overrides ask-user.json", async () => {
+         stubSettingsFile(JSON.stringify({ displayMode: "overlay" }));
+         stubEnv("PI_ASK_USER_DISPLAY_MODE", "inline");
+         const capturedOptions = await executeWithCapturedOptions({});
+         expect(capturedOptions).toBeUndefined();
+      });
+
+      test("call-level displayMode overrides ask-user.json", async () => {
+         stubSettingsFile(JSON.stringify({ displayMode: "inline" }));
+         const capturedOptions = await executeWithCapturedOptions({ displayMode: "overlay" });
+         expect(capturedOptions.overlay).toBe(true);
+      });
+
+      test("ignores unrecognised ask-user.json displayMode and falls back to overlay", async () => {
+         stubSettingsFile(JSON.stringify({ displayMode: "fullscreen" }));
+         const capturedOptions = await executeWithCapturedOptions({});
+         expect(capturedOptions.overlay).toBe(true);
+      });
+
+      test("malformed ask-user.json fails the call with the file path", async () => {
+         stubSettingsFile("{ not json");
+         const tool = await setupTool();
+         await expect(
+            tool.execute(
+               "tool-call-id",
+               { question: "Which option should we use?", options: ["A", "B"] },
+               undefined,
+               undefined,
+               { hasUI: true, ui: { custom: async () => null } },
+            ),
+         ).rejects.toThrow(/ask-user\.json/);
+      });
    });
 
    describe("overlay hide/show toggle (alt+o)", () => {
