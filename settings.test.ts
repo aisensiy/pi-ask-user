@@ -29,6 +29,14 @@ function tempSettingsFile(contents: string): string {
 
 describe("getAskUserSettingsPath", () => {
    test("defaults to ask-user.json in ~/.pi/agent", () => {
+      // Other test files may point PI_CODING_AGENT_DIR at an isolation temp
+      // dir for the whole process; the default resolution must be checked
+      // with the variable explicitly absent.
+      const original = process.env.PI_CODING_AGENT_DIR;
+      delete process.env.PI_CODING_AGENT_DIR;
+      onTestFinished(() => {
+         if (original !== undefined) process.env.PI_CODING_AGENT_DIR = original;
+      });
       expect(getAskUserSettingsPath().endsWith(join(".pi", "agent", "ask-user.json"))).toBe(true);
    });
 

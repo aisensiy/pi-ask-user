@@ -226,6 +226,13 @@ function stubEnv(key: string, value: string): void {
 }
 
 async function setupTool(): Promise<RegisteredTool> {
+   // Isolate preference resolution from the developer's real agent directory:
+   // a locally configured ~/.pi/agent/ask-user.json (or PI_CODING_AGENT_DIR)
+   // must not leak into overlay/layout defaults. Tests that exercise the
+   // settings file point this at their own temp directory via stubEnv.
+   if (process.env.PI_CODING_AGENT_DIR === undefined) {
+      process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "ask-user-test-agent-dir-"));
+   }
    const { default: askUserExtension } = await import("./index");
    let registeredTool: RegisteredTool | undefined;
    emittedEvents = [];
