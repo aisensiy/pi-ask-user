@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, mock, onTestFinished, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, onTestFinished, spyOn, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { getEventListeners } from "node:events";
 import { tmpdir } from "node:os";
@@ -112,7 +112,19 @@ type AskComponentFactory = (
    done: (value: unknown) => void,
 ) => { handleInput(data: string): void };
 
+let isolatedAgentDir: string;
+let originalAgentDir: string | undefined;
+
 beforeAll(() => {
+   // Isolate preference resolution from the developer's real agent directory,
+   // even when PI_CODING_AGENT_DIR points at a configured one: a local
+   // ask-user.json must not leak into overlay/layout defaults. Tests that
+   // exercise the settings file point this at their own temp directory via
+   // stubEnv, which restores this baseline afterwards.
+   isolatedAgentDir = mkdtempSync(join(tmpdir(), "ask-user-test-agent-dir-"));
+   originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+   process.env.PI_CODING_AGENT_DIR = isolatedAgentDir;
+
    // Model the failure mode from https://github.com/edlsh/pi-ask-user/issues/17.
    // `getMarkdownTheme()` returns a bag of closures that read through a Proxy
    // over the host's theme singleton. When the extension's bundled copy of
@@ -208,6 +220,14 @@ beforeAll(() => {
    }));
 });
 
+afterAll(() => {
+   if (originalAgentDir === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+   } else {
+      process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+   }
+});
+
 type RegisteredTool = {
    execute: (...args: any[]) => Promise<any>;
    renderResult: (result: any, options: any, theme: any, context?: any) => any;
@@ -226,13 +246,6 @@ function stubEnv(key: string, value: string): void {
 }
 
 async function setupTool(): Promise<RegisteredTool> {
-   // Isolate preference resolution from the developer's real agent directory:
-   // a locally configured ~/.pi/agent/ask-user.json (or PI_CODING_AGENT_DIR)
-   // must not leak into overlay/layout defaults. Tests that exercise the
-   // settings file point this at their own temp directory via stubEnv.
-   if (process.env.PI_CODING_AGENT_DIR === undefined) {
-      process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "ask-user-test-agent-dir-"));
-   }
    const { default: askUserExtension } = await import("./index");
    let registeredTool: RegisteredTool | undefined;
    emittedEvents = [];
