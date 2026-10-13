@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, mock, onTestFinished, spyOn, test } from "bun:test";
 import { getEventListeners } from "node:events";
 import type { StringEnumBuilder } from "./index";
+import { NATIVE_COMPONENT, type TernContext, type TernEvent, type TernNode } from "./tern";
 
 let editorInputs: string[] = [];
 let editorText = "";
@@ -230,6 +231,8 @@ async function setupTool(): Promise<RegisteredTool> {
       registerTool(tool: RegisteredTool) {
          registeredTool = tool;
       },
+      // Lifecycle hooks (the Tern card registration); these tests never start a session.
+      on() {},
       events: {
          emit(name: string, payload: any) {
             emittedEvents.push({ name, payload });
@@ -3882,5 +3885,73 @@ describe("questions batch", () => {
 
       expect(render({ ...details, answers: [], cancelled: true }, false)).toBe("Cancelled");
       expect(render(details, false, { isError: true })).toBe("✗ boom");
+   });
+});
+
+describe("Tern native presentation", () => {
+   // pi-tern names list children and the emitting node by full id, as Tern does.
+   const list = "layer.dialog.sheet.options";
+
+   interface NativePrompt {
+      [NATIVE_COMPONENT](native: TernContext): TernNode;
+   }
+   type TuiStub = { requestRender(): void; terminal: { rows: number } };
+   type ThemeStub = { fg(color: string, text: string): string; bold(text: string): string };
+   type KeybindingsStub = { matches(data: string, keybinding: string): boolean; getKeys(keybinding: string): string[] };
+   type NativePromptFactory<Answer> = (tui: TuiStub, theme: ThemeStub, keybindings: KeybindingsStub, done: (answer: Answer) => void) => NativePrompt;
+
+   /** The prompt's native sheet and a way to send it Tern events, as pi-tern does on each render. */
+   function present(component: NativePrompt) {
+      let handler: ((event: TernEvent) => void) | undefined;
+      const node = component[NATIVE_COMPONENT]({ requestRender() { }, onEvent(listener) { handler = listener; }, field() { } });
+      return { node, fire: (event: TernEvent) => handler?.(event) };
+   }
+
+   /** Run ask_user with a UI that hands the created prompt to `drive`. */
+   type AskArgs = { question?: string; options?: string[]; questions?: { question: string; options: string[]; allowMultiple?: boolean }[] };
+   async function run(params: AskArgs, drive: (component: NativePrompt) => void) {
+      const tool = await setupTool();
+      return tool.execute("tool-call-id", { ...params, displayMode: "inline" }, undefined, undefined, {
+         hasUI: true,
+         ui: {
+            custom<Answer>(factory: NativePromptFactory<Answer>): Promise<Answer> {
+               const { promise, resolve } = Promise.withResolvers<Answer>();
+               drive(factory({ requestRender() { }, terminal: { rows: 24 } }, createTheme(), createKeybindings(), resolve));
+               return promise;
+            },
+         },
+      });
+   }
+
+   test("a click on an option answers a single question", async () => {
+      const result = await run({ question: "Which one?", options: ["A", "B"] }, (component) => {
+         const { node, fire } = present(component);
+         expect(node.k).toBe("overlay");
+         fire({ ev: "select", id: list, item: `${list}.o1` });
+      });
+      expect(result.details.response).toEqual({ kind: "selection", selections: ["B"] });
+   });
+
+   test("a batch is answered by clicks: a choice, a multi-select toggle with Submit, then the review's Submit", async () => {
+      const result = await run({
+         questions: [
+            { question: "Region?", options: ["us", "eu"] },
+            { question: "Features?", options: ["Backups", "Metrics"], allowMultiple: true },
+         ],
+      }, (component) => {
+         present(component).fire({ ev: "select", id: list, item: `${list}.o1` });
+         // A multi-select click ticks the option; it is not an answer until Submit.
+         present(component).fire({ ev: "select", id: list, item: `${list}.o1` });
+         const options = present(component).node.c[0]?.c.find((child) => child.key === "options");
+         expect(options?.c[1]?.p.icon).toBe("check");
+         present(component).fire({ ev: "action", act: "submit" });
+         const review = present(component);
+         expect(JSON.stringify(review.node)).toContain("Review");
+         review.fire({ ev: "action", act: "submit" });
+      });
+      expect(result.details.answers).toEqual([
+         { status: "answered", response: { kind: "selection", selections: ["eu"] } },
+         { status: "answered", response: { kind: "selection", selections: ["Metrics"] } },
+      ]);
    });
 });

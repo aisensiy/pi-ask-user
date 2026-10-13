@@ -215,6 +215,10 @@ The custom UI uses one timeout for the prompt. In the dialog fallback, the confi
 
 If context wraps beyond the available decision area, `ask_user` collapses it into a one-line summary so the question and at least one choice remain visible. Press the context key shown in the prompt (`ctrl+e` by default) to expand or collapse the complete context; expanded context remains bounded and scrollable with the existing prompt-scroll keys in both display modes.
 
+### Tern
+
+With [pi-tern](https://github.com/edlsh/pi-tern) in a [Tern](https://stencil.so) pane, the prompt is a native sheet laid out like omp's ask dialog: question tabs for a batch, the question and context as markdown, the options as a clickable list, a native editor for custom responses and comments, a review page and an action bar. Keys still go to `ask_user` as in any terminal. The tool card shows each question over all of its options, with a check on the chosen ones. Both hooks use pi-tern's global symbols, so nothing changes when pi-tern isn't installed.
+
 ### Events
 
 While an interactive prompt is open, the extension emits `herdr:blocked` with `{ active: true, label: "Waiting for user response" }`. It emits `{ active: false }` in `finally`, including cancellation and error paths. Hosts without a listener are unaffected.

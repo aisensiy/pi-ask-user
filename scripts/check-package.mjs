@@ -12,6 +12,7 @@ const expectedFiles = [
   "single-select-layout.ts",
   "skills/ask-user/SKILL.md",
   "skills/ask-user/references/ask-user-skill-extension-spec.md",
+  "tern.ts",
 ];
 assert.deepEqual(tarball.files.map(({ path }) => path).sort(), expectedFiles.sort());
 console.log(`Package contents verified: ${tarball.files.length} files (${tarball.size} bytes packed)`);

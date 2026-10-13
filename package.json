@@ -36,6 +36,7 @@
   "files": [
     "index.ts",
     "single-select-layout.ts",
+    "tern.ts",
     "skills",
     "README.md",
     "LICENSE"

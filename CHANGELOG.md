@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Native presentation in [Tern](https://stencil.so) through [pi-tern](https://github.com/edlsh/pi-tern)'s optional hooks: the prompt is a native sheet in omp's ask style (question tabs, markdown question and context, clickable options, a native editor bound to the custom-response and comment editor, the review page, an action bar), and the tool card shows every option with the chosen ones checked. Pointer events run the same transitions as the keys. Without pi-tern nothing changes; the hooks are global symbols and nothing imports pi-tern.
+
 ## [0.16.0](https://github.com/edlsh/pi-ask-user/releases/tag/v0.16.0) - 2026-10-02
 
 ### Added

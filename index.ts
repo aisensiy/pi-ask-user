@@ -40,6 +40,22 @@ import {
    wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { renderSingleSelectRows, type QuestionOption } from "./single-select-layout";
+import {
+   askToolCard,
+   CHOICE_LIST_KEY,
+   type ChoiceList,
+   type ChoiceRow,
+   choiceSheet,
+   NATIVE_COMPONENT,
+   type QuestionTabs,
+   registerTernTool,
+   reviewSheet,
+   type TernContext,
+   type TernEvent,
+   type TernNode,
+   nodeKey,
+   textSheet,
+} from "./tern";
 
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
@@ -658,40 +674,67 @@ class MultiSelectList implements Component {
       }
 
       if (matchesKey(data, Key.space)) {
-         if (this.isCommentToggleRow(this.selectedIndex)) {
-            this.toggleComment();
-            return;
-         }
-         if (this.isFreeformRow(this.selectedIndex)) {
-            this.onEnterFreeform?.();
-            return;
-         }
-         this.toggle(this.selectedIndex);
-         this.invalidate();
+         this.activate();
          return;
       }
 
       if (this.keybindings.matches(data, "tui.select.confirm")) {
-         if (this.isCommentToggleRow(this.selectedIndex)) {
-            this.toggleComment();
+         if (this.isCommentToggleRow(this.selectedIndex) || this.isFreeformRow(this.selectedIndex)) {
+            this.activate();
             return;
          }
-         if (this.isFreeformRow(this.selectedIndex)) {
-            this.onEnterFreeform?.();
-            return;
-         }
-
-         const selectedTitles = Array.from(this.checked)
-            .sort((a, b) => a - b)
-            .map((i) => this.options[i]?.title)
-            .filter((t): t is string => !!t);
-
-         const fallback = this.options[this.selectedIndex]?.title;
-         const result = selectedTitles.length > 0 ? selectedTitles : fallback ? [fallback] : [];
-
-         if (result.length > 0) this.onSubmit?.(result);
-         else this.onCancel?.();
+         this.submit();
       }
+   }
+
+   /** Space on the selected row: tick the option, toggle the comment, or open the custom response. */
+   private activate(): void {
+      if (this.isCommentToggleRow(this.selectedIndex)) {
+         this.toggleComment();
+         return;
+      }
+      if (this.isFreeformRow(this.selectedIndex)) {
+         this.onEnterFreeform?.();
+         return;
+      }
+      this.toggle(this.selectedIndex);
+      this.invalidate();
+   }
+
+   /** Submit the ticked options, or the selected one when none is ticked. */
+   submit(): void {
+      const selectedTitles = Array.from(this.checked)
+         .sort((a, b) => a - b)
+         .map((i) => this.options[i]?.title)
+         .filter((t): t is string => !!t);
+
+      const fallback = this.options[this.selectedIndex]?.title;
+      const result = selectedTitles.length > 0 ? selectedTitles : fallback ? [fallback] : [];
+
+      if (result.length > 0) this.onSubmit?.(result);
+      else this.onCancel?.();
+   }
+
+   /** The rows as shown (options with their ticks, comment toggle, custom response), for Tern's native sheet. */
+   nativeSheet(): ChoiceList {
+      const rows: ChoiceRow[] = this.options.map((option, index) => ({
+         id: `o${index}`,
+         kind: "option",
+         label: option.title,
+         detail: option.description,
+         on: this.checked.has(index),
+      }));
+      if (this.allowComment) rows.push({ id: "comment", kind: "comment", label: COMMENT_TOGGLE_LABEL, on: this.commentEnabled });
+      if (this.allowFreeform) rows.push({ id: "freeform", kind: "freeform", label: "Other" });
+      return { rows, selected: this.selectedIndex };
+   }
+
+   /** Select row `row` of nativeSheet(); `activate` then acts as Space on it. */
+   selectRow(row: number, activate: boolean): void {
+      if (row < 0 || row >= this.getItemCount()) return;
+      this.selectedIndex = row;
+      this.invalidate();
+      if (activate) this.activate();
    }
 
    render(width: number): string[] {
@@ -1048,6 +1091,44 @@ class WrappedSingleSelectList implements Component {
       return visibleLines;
    }
 
+   /** Enter on the selected row: toggle the comment, open the custom response, or choose the option. */
+   private confirm(filteredOptions: QuestionOption[]): void {
+      if (this.isCommentToggleRow(this.selectedIndex, filteredOptions)) {
+         this.toggleComment();
+         return;
+      }
+      if (this.isFreeformRow(this.selectedIndex, filteredOptions)) {
+         this.onEnterFreeform?.();
+         return;
+      }
+
+      const result = filteredOptions[this.selectedIndex]?.title;
+      if (result) this.onSubmit?.(result);
+      else this.onCancel?.();
+   }
+
+   /** The rows as shown (filtered options, comment toggle, custom response), for Tern's native sheet. */
+   nativeSheet(): ChoiceList {
+      const rows: ChoiceRow[] = this.getFilteredOptions().map((option) => ({
+         id: `o${this.options.indexOf(option)}`,
+         kind: "option",
+         label: option.title,
+         detail: option.description,
+      }));
+      if (this.allowComment) rows.push({ id: "comment", kind: "comment", label: COMMENT_TOGGLE_LABEL, on: this.commentEnabled });
+      if (this.allowFreeform) rows.push({ id: "freeform", kind: "freeform", label: "Other" });
+      return { rows, selected: this.selectedIndex, query: this.searchQuery };
+   }
+
+   /** Select row `row` of nativeSheet(); `activate` then acts as Enter on it. */
+   selectRow(row: number, activate: boolean): void {
+      const filteredOptions = this.getFilteredOptions();
+      if (row < 0 || row >= this.getItemCount(filteredOptions)) return;
+      this.selectedIndex = row;
+      this.invalidate();
+      if (activate) this.confirm(filteredOptions);
+   }
+
    handleInput(data: string): void {
       if (this.searchQuery && matchesKey(data, Key.escape)) {
          this.setSearchQuery("");
@@ -1095,18 +1176,7 @@ class WrappedSingleSelectList implements Component {
       }
 
       if (this.keybindings.matches(data, "tui.select.confirm") && count > 0) {
-         if (this.isCommentToggleRow(this.selectedIndex, filteredOptions)) {
-            this.toggleComment();
-            return;
-         }
-         if (this.isFreeformRow(this.selectedIndex, filteredOptions)) {
-            this.onEnterFreeform?.();
-            return;
-         }
-
-         const result = filteredOptions[this.selectedIndex]?.title;
-         if (result) this.onSubmit?.(result);
-         else this.onCancel?.();
+         this.confirm(filteredOptions);
          return;
       }
 
@@ -1185,6 +1255,8 @@ class AskComponent extends Container {
    // A batch page shows its position in the frame title and a navigation hint.
    private frameTitle = "ask_user";
    private navigationHint: string | null = null;
+   // A batch page's question tabs in Tern's native sheet, and where choosing one goes.
+   private nativeTabs?: { tabs: QuestionTabs; go: (id: string) => void };
 
    // Static layout components
    private titleText: Text;
@@ -1778,6 +1850,77 @@ class AskComponent extends Container {
       this.updateHelpText();
    }
 
+   /** Batch pages: the question tabs of the native sheet. */
+   setNativeTabs(tabs: QuestionTabs, go: (id: string) => void): void {
+      this.nativeTabs = { tabs, go };
+   }
+
+   /**
+    * pi-tern's native presentation, in omp's ask style: the options as a list
+    * (a click is Enter on a row, Space on a multi-select option), or the custom
+    * response / comment over a native editor bound to pi's. Every pointer event
+    * runs the transition the keys run.
+    */
+   [NATIVE_COMPONENT](native: TernContext): TernNode {
+      const tabs = this.nativeTabs;
+      // A tab click; true when the event was one.
+      const onTab = (event: TernEvent): boolean => {
+         if (event.ev !== "select" || nodeKey(event.id) !== "tabs") return false;
+         tabs?.go(nodeKey(event.item));
+         return true;
+      };
+
+      if (this.mode === "freeform" || this.mode === "comment") {
+         const editor = this.ensureEditor();
+         native.field(editor);
+         const { line, col } = editor.getCursor();
+         const cursor = editor.getLines().slice(0, line).reduce((sum, text) => sum + text.length + 1, 0) + col;
+         const backToOptions = this.options.length > 0;
+         native.onEvent((event) => {
+            if (onTab(event) || event.ev !== "action") return;
+            if (event.act === "cancel" || event.act === "close") {
+               if (backToOptions) this.showSelectMode();
+               else this.onDone(null);
+            } else if (event.act === "submit") {
+               this.handleEditorSubmit(editor.getText());
+            }
+         });
+         return textSheet({
+            question: this.question,
+            context: this.context,
+            lead: this.mode === "comment" ? `Selected: ${this.pendingSelections.join(", ")}` : undefined,
+            text: editor.getText(),
+            cursor,
+            placeholder: this.mode === "comment" ? "Add context for your selection" : "Type your answer",
+            escape: backToOptions ? "back" : "cancel",
+            tabs: tabs?.tabs,
+         });
+      }
+
+      const list = this.allowMultiple ? this.ensureMultiSelectList() : this.ensureSingleSelectList();
+      const sheet = list.nativeSheet();
+      native.onEvent((event) => {
+         if (onTab(event)) return;
+         if (event.ev === "select" && nodeKey(event.id) === CHOICE_LIST_KEY) {
+            list.selectRow(sheet.rows.findIndex((row) => row.id === nodeKey(event.item)), true);
+         } else if (event.ev === "action") {
+            if (event.act === "cancel" || event.act === "close") this.onDone(null);
+            else if (event.act === "submit" && this.multiSelectList) this.multiSelectList.submit();
+            else if (event.act === "submit") list.selectRow(sheet.selected, true);
+         }
+         this.tui.requestRender();
+      });
+      return choiceSheet({
+         question: this.question,
+         context: this.context,
+         rows: sheet.rows,
+         selected: sheet.selected,
+         multiple: this.allowMultiple,
+         query: sheet.query,
+         tabs: tabs?.tabs,
+      });
+   }
+
    private ensureSingleSelectList(): WrappedSingleSelectList {
       if (this.singleSelectList) return this.singleSelectList;
 
@@ -2058,6 +2201,8 @@ class BatchAskComponent implements Component {
    private current = 0;
    private title = "";
    private confirmingSkips = false;
+   // The native sheets' question tabs, rebuilt with the frame title.
+   private tabs: QuestionTabs = { tabs: [], tab: "q0" };
    private reviewScrollOffset = 0;
    private reviewMaxScrollOffset = 0;
    private _focused = false;
@@ -2166,6 +2311,54 @@ class BatchAskComponent implements Component {
       this.title = `ask_user ${labels.join(" ")} · ${review}`;
       const hint = literalHint(this.theme, "tab/shift+tab", "questions");
       for (const page of this.pages) page.setBatchChrome(this.title, hint);
+      this.tabs = {
+         tabs: [
+            ...this.questions.map((entry, index) => ({
+               id: `q${index}`,
+               label: `${this.answers[index] ? "✓ " : ""}${truncateToWidth(entry.question, 28, "…")}`,
+            })),
+            { id: "review", label: "Review" },
+         ],
+         tab: this.current < this.questions.length ? `q${this.current}` : "review",
+      };
+      for (const page of this.pages) page.setNativeTabs(this.tabs, (id) => this.goToTab(id));
+   }
+
+   /** A native tab (`q<index>` or `review`). */
+   private goToTab(id: string): void {
+      const target = id === "review" ? this.questions.length : Number(id.slice(1));
+      if (Number.isInteger(target) && target >= 0 && target <= this.questions.length && target !== this.current) this.goTo(target);
+   }
+
+   /** pi-tern's native presentation: the current question's sheet, or the review sheet. */
+   [NATIVE_COMPONENT](native: TernContext): TernNode {
+      const page = this.pages[this.current];
+      if (page) return page[NATIVE_COMPONENT](native);
+      native.onEvent((event) => {
+         if (event.ev === "select" && nodeKey(event.id) === "tabs") this.goToTab(nodeKey(event.item));
+         else if (event.ev !== "action") return;
+         else if (event.act === "cancel" || event.act === "close") this.onDone(null);
+         else if (event.act === "submit") this.submitReview();
+      });
+      return reviewSheet({
+         rows: this.questions.map((entry, index) => {
+            const response = this.answers[index];
+            return { question: entry.question, answer: response ? formatResponseSummary(response) : undefined };
+         }),
+         tabs: this.tabs,
+         confirmSkips: this.confirmingSkips,
+      });
+   }
+
+   /** Submit from the review page; with unanswered questions, the first submit asks to confirm. */
+   private submitReview(): void {
+      if (this.unansweredCount() > 0 && !this.confirmingSkips) {
+         this.confirmingSkips = true;
+         this.tui.requestRender();
+         return;
+      }
+      this.onDone(this.answers.map((response): BatchAnswer =>
+         response ? { status: "answered", response } : { status: "skipped" }));
    }
 
    private unansweredCount(): number {
@@ -2178,13 +2371,7 @@ class BatchAskComponent implements Component {
          return;
       }
       if (this.keybindings.matches(data, "tui.select.confirm")) {
-         if (this.unansweredCount() > 0 && !this.confirmingSkips) {
-            this.confirmingSkips = true;
-            this.tui.requestRender();
-            return;
-         }
-         this.onDone(this.answers.map((response): BatchAnswer =>
-            response ? { status: "answered", response } : { status: "skipped" }));
+         this.submitReview();
          return;
       }
       // Kitty's keyboard protocol can deliver digits as CSI-u sequences.
@@ -3156,4 +3343,6 @@ export default function(pi: ExtensionAPI) {
          return new Text(text, 0, 0);
       },
    });
+   // In Tern (with pi-tern), the card is drawn natively; pi's renderers above serve every other terminal.
+   registerTernTool(pi, "ask_user", askToolCard);
 }
