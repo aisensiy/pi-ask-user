@@ -3468,7 +3468,6 @@ describe("questions batch", () => {
    const twoQuestions = [{ question: "First?" }, { question: "Second?" }];
    const validationCases: Array<{ name: string; params: Record<string, unknown>; expected: string[]; noUI?: boolean }> = [
       { name: "neither question nor questions", params: {}, expected: ["needs question"] },
-      { name: "both question and questions", params: { question: "Q?", questions: twoQuestions }, expected: ["exactly one of question or questions"] },
       { name: "a single entry", params: { questions: [{ question: "Only?" }] }, expected: ["got 1", "use question instead"] },
       { name: "five entries", params: { questions: ["A?", "B?", "C?", "D?", "E?"].map((question) => ({ question })) }, expected: ["at most 4"] },
       { name: "a non-array questions value", params: { questions: "First?" }, expected: ["must be an array"] },
@@ -3505,6 +3504,27 @@ describe("questions batch", () => {
          expect(emittedEvents).toEqual([]);
       });
    }
+
+   test("a top-level question sent with questions becomes the batch heading, not a question (#80)", async () => {
+      const tool = await setupTool();
+      const { state, custom } = mountBatchPrompt();
+      const execution = tool.execute(
+         "id",
+         { question: "Project setup", questions: [{ question: "Which database?", options: ["Postgres", "SQLite"] }, { question: "Which ORM?", options: ["Drizzle", "Prisma"] }] },
+         undefined,
+         undefined,
+         { hasUI: true, ui: { custom } },
+      );
+      const prompt = state.component;
+      expect(prompt.render(100).join("\n")).toContain("ask_user · Project setup [1] 2 · review");
+      press(prompt, "enter", "enter");
+      expect(prompt.render(100).join("\n")).toContain("Project setup");
+      press(prompt, "enter");
+      const result = await execution;
+      expect(result.details.heading).toBe("Project setup");
+      expect(result.details.questions.map((entry: { question: string }) => entry.question)).toEqual(["Which database?", "Which ORM?"]);
+      expect(result.content[0].text).toBe("Project setup\nUser answered 2 of 2 questions:\n1. Which database? → Postgres\n2. Which ORM? → Drizzle");
+   });
 
    test("records each page's answer and publishes nothing until the review page submits", async () => {
       stubEnv("PI_ASK_USER_EMIT_FULL_EVENTS", "false");

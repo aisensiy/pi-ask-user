@@ -223,6 +223,7 @@ export function reviewSheet(sheet: ReviewSheet): TernNode {
 /** The parts of ask_user's result details the card reads (single and batch shapes). */
 export interface AskCardDetails {
    readonly kind?: "batch";
+   readonly heading?: string;
    readonly question?: string;
    readonly context?: string;
    readonly options?: readonly { title: string }[];
@@ -289,7 +290,7 @@ export function askToolCard(call: TernToolCall): TernNode | undefined {
       });
       return n("tool", {
          title: "Ask",
-         target: firstLine(questions[0]?.question ?? ""),
+         target: firstLine(details?.heading ?? (call.args.question ? String(call.args.question) : questions[0]?.question ?? "")),
          targetKind: "text",
          meta: [`${questions.length} questions`],
       }, [...sections, settled ? null : n("text", { spans: [{ t: "Waiting for your answers…", s: "muted" }] }, [], "waiting")]);
