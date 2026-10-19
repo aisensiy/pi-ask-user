@@ -2311,7 +2311,8 @@ class BatchAskComponent implements Component {
          return index === this.current ? `[${label}]` : label;
       });
       const review = this.current === this.questions.length ? "[review]" : "review";
-      const heading = this.heading ? ` · ${truncateToWidth(this.heading, 40, "…")}` : "";
+      // The frame title is one terminal row, so the heading's line breaks collapse here only.
+      const heading = this.heading ? ` · ${truncateToWidth(this.heading.replace(/\s+/g, " "), 40, "…")}` : "";
       this.title = `ask_user${heading} ${labels.join(" ")} · ${review}`;
       const hint = literalHint(this.theme, "tab/shift+tab", "questions");
       for (const page of this.pages) page.setBatchChrome(this.title, hint);
@@ -2324,6 +2325,7 @@ class BatchAskComponent implements Component {
             { id: "review", label: "Review" },
          ],
          tab: this.current < this.questions.length ? `q${this.current}` : "review",
+         ...(this.heading ? { heading: this.heading } : {}),
       };
       for (const page of this.pages) page.setNativeTabs(this.tabs, (id) => this.goToTab(id));
    }
@@ -3272,7 +3274,7 @@ export default function(pi: ExtensionAPI) {
             let text = theme.fg("toolTitle", theme.bold("ask_user "));
             text += theme.fg("muted", `${entries.length} questions`);
             if (typeof args.question === "string" && args.question.trim()) {
-               text += theme.fg("text", ` · ${args.question.trim()}`);
+               text += theme.fg("text", ` · ${args.question.trim().replace(/\s+/g, " ")}`);
             }
             if (args.allowComment) {
                text += theme.fg("dim", " [optional comment]");
