@@ -3468,7 +3468,6 @@ describe("questions batch", () => {
    const twoQuestions = [{ question: "First?" }, { question: "Second?" }];
    const validationCases: Array<{ name: string; params: Record<string, unknown>; expected: string[]; noUI?: boolean }> = [
       { name: "neither question nor questions", params: {}, expected: ["needs question"] },
-      { name: "both question and questions", params: { question: "Q?", questions: twoQuestions }, expected: ["exactly one of question or questions"] },
       { name: "a single entry", params: { questions: [{ question: "Only?" }] }, expected: ["got 1", "use question instead"] },
       { name: "five entries", params: { questions: ["A?", "B?", "C?", "D?", "E?"].map((question) => ({ question })) }, expected: ["at most 4"] },
       { name: "a non-array questions value", params: { questions: "First?" }, expected: ["must be an array"] },
@@ -3505,6 +3504,28 @@ describe("questions batch", () => {
          expect(emittedEvents).toEqual([]);
       });
    }
+
+   test("a top-level question sent with questions becomes the batch heading, not a question (#80)", async () => {
+      const tool = await setupTool();
+      const { state, custom } = mountBatchPrompt();
+      const execution = tool.execute(
+         "id",
+         { question: "Project setup\nChoose defaults", questions: [{ question: "Which database?", options: ["Postgres", "SQLite"] }, { question: "Which ORM?", options: ["Drizzle", "Prisma"] }] },
+         undefined,
+         undefined,
+         { hasUI: true, ui: { custom } },
+      );
+      const prompt = state.component;
+      expect(prompt.render(100).join("\n")).toContain("ask_user · Project setup Choose defaults [1] 2 · review");
+      expect(prompt.render(100).some((row: string) => row.includes("\n"))).toBe(false);
+      press(prompt, "enter", "enter");
+      expect(prompt.render(100).join("\n")).toContain("Project setup");
+      press(prompt, "enter");
+      const result = await execution;
+      expect(result.details.heading).toBe("Project setup\nChoose defaults");
+      expect(result.details.questions.map((entry: { question: string }) => entry.question)).toEqual(["Which database?", "Which ORM?"]);
+      expect(result.content[0].text).toBe("Project setup\nChoose defaults\nUser answered 2 of 2 questions:\n1. Which database? → Postgres\n2. Which ORM? → Drizzle");
+   });
 
    test("records each page's answer and publishes nothing until the review page submits", async () => {
       stubEnv("PI_ASK_USER_EMIT_FULL_EVENTS", "false");
@@ -3953,5 +3974,20 @@ describe("Tern native presentation", () => {
          { status: "answered", response: { kind: "selection", selections: ["eu"] } },
          { status: "answered", response: { kind: "selection", selections: ["Metrics"] } },
       ]);
+   });
+
+   test("a batch heading shows on every native question sheet and the review", async () => {
+      await run({
+         question: "Project setup",
+         questions: [{ question: "Region?", options: ["us", "eu"] }, { question: "Tier?", options: ["free", "pro"] }],
+      }, (component) => {
+         const headingOf = () => present(component).node.c[0]?.c.find((child) => child.key === "heading")?.p.text;
+         expect(headingOf()).toBe("Project setup");
+         present(component).fire({ ev: "select", id: list, item: `${list}.o0` });
+         present(component).fire({ ev: "select", id: list, item: `${list}.o0` });
+         expect(JSON.stringify(present(component).node)).toContain("Review");
+         expect(headingOf()).toBe("Project setup");
+         present(component).fire({ ev: "action", act: "submit" });
+      });
    });
 });

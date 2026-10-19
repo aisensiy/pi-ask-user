@@ -97,6 +97,8 @@ export interface ChoiceRow {
 export interface QuestionTabs {
    readonly tabs: readonly { id: string; label: string }[];
    readonly tab: string;
+   /** A batch's optional heading (the top-level question sent with questions), shown above every sheet. */
+   readonly heading?: string;
 }
 
 /** A selection list's state as its sheet shows it: rows in the list's order, the selected row, the filter. */
@@ -135,8 +137,9 @@ function askSheet(tabs: QuestionTabs | undefined, children: readonly (TernNode |
          n("tabs", { items: tabs.tabs.map((tab) => ({ ...tab })), active: tabs.tab, role: "omp.ask.questions", actions: { click: "select" } }, [], "tabs"),
       ], "head")
       : null;
+   const heading = tabs?.heading ? n("md", { text: tabs.heading, role: "omp.ask.heading" }, [], "heading") : null;
    return n("overlay", { role: "omp.overlay.ask", anchor: "bottom", size: "md", modal: true }, [
-      n("col", { gap: "md" }, [head, ...children], "sheet"),
+      n("col", { gap: "md" }, [head, heading, ...children], "sheet"),
    ]);
 }
 
@@ -223,6 +226,7 @@ export function reviewSheet(sheet: ReviewSheet): TernNode {
 /** The parts of ask_user's result details the card reads (single and batch shapes). */
 export interface AskCardDetails {
    readonly kind?: "batch";
+   readonly heading?: string;
    readonly question?: string;
    readonly context?: string;
    readonly options?: readonly { title: string }[];
@@ -289,7 +293,7 @@ export function askToolCard(call: TernToolCall): TernNode | undefined {
       });
       return n("tool", {
          title: "Ask",
-         target: firstLine(questions[0]?.question ?? ""),
+         target: firstLine(details?.heading ?? (call.args.question ? String(call.args.question) : questions[0]?.question ?? "")),
          targetKind: "text",
          meta: [`${questions.length} questions`],
       }, [...sections, settled ? null : n("text", { spans: [{ t: "Waiting for your answers…", s: "muted" }] }, [], "waiting")]);
